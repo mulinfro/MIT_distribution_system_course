@@ -29,7 +29,7 @@ type AskJobArgs struct {
 
 type AskJobReply struct {
     taskid   int
-	filename []string
+	filenames []string
     jobtype  string
     outfile  string
 }

@@ -4,6 +4,7 @@ import "fmt"
 import "log"
 import "net/rpc"
 import "hash/fnv"
+import "time"
 
 
 //
@@ -80,51 +81,55 @@ func Worker(mapf func(string, string) []KeyValue,
     args.workid = 1
 	reply := AskJobReply{}
 	call("Master.GetOneJob", &args, &reply)
+    
+    for reply.jobtype != "DONE" {
+        if reply.jobtype == "MAP" {
+            nReduce := reply.nReduce
+            content := readFile(reply.filenames[0])
+            kva := mapf(reply.filename, string(content))
+            sort.Slice(kva, func(i, j int) bool { return ihash(kva[i].Key) % nReduce < ihash(kva[j].Key) % nReduce } )
 
-    if reply.jobtype == "MAP" {
-        nReduce := reply.nReduce
-        content := readFile(reply.filename)
-        kva := mapf(reply.filename, string(content))
-        sort.Slice(kva, func(i, j int) bool { return ihash(kva[i].Key) % nReduce < ihash(kva[j].Key) % nReduce } )
-
-        taskidStr := string(reply.taskid)
-        preReduceId := -1
-        var enc *Encoder = nil
-        for _, kv := range kva {
-            reduceid := ihash(kv.Key) % reply.nReduce
-            if reduceid != preReduceId {
-                preReduceId = reduceid
-                filename = "mr-" + taskidStr + "-" + string(reduceid)
-                file, err := os.Open(filename)
-                if err != nil {
-                    log.Fatalf("cannot open %v", filename)
+            taskidStr := string(reply.taskid)
+            preReduceId := -1
+            var enc *Encoder = nil
+            for _, kv := range kva {
+                reduceid := ihash(kv.Key) % reply.nReduce
+                if reduceid != preReduceId {
+                    preReduceId = reduceid
+                    filename = "mr-" + taskidStr + "-" + string(reduceid)
+                    file, err := os.Open(filename)
+                    if err != nil {
+                        log.Fatalf("cannot open %v", filename)
+                    }
+                    enc := json.NewEncoder(file)
                 }
-                enc := json.NewEncoder(file)
+                err := enc.Encode(&kv)
             }
-            err := enc.Encode(&kv)
-        }
-    }else if reply.jobtype == "REDUCE" {
+        }else if reply.jobtype == "REDUCE" {
 
-        kva := loadAllMapInterFile(reply.filenames)
-        sort.Sort(ByKey(intermediate))
+            kva := loadAllMapInterFile(reply.filenames)
+            sort.Sort(ByKey(intermediate))
 
-        oname := reply.outfile
-        ofile, _ := os.Create(oname)
+            oname := reply.outfile
+            ofile, _ := os.Create(oname)
 
-        i := 0
-        for i < len(kva) {
-            j := i + 1
-            for j < len(intermediate) && intermediate[j].Key == intermediate[i].Key {
-                j++
+            i := 0
+            for i < len(kva) {
+                j := i + 1
+                for j < len(intermediate) && intermediate[j].Key == intermediate[i].Key {
+                    j++
+                }
+                values := []string{}
+                for k := i; k < j; k++ {
+                    values = append(values, intermediate[k].Value)
+                }
+                output := reducef(intermediate[i].Key, values)
+                fmt.Fprintf(ofile, "%v %v\n", intermediate[i].Key, output)
+                i = j
+
             }
-            values := []string{}
-            for k := i; k < j; k++ {
-                values = append(values, intermediate[k].Value)
-            }
-            output := reducef(intermediate[i].Key, values)
-            fmt.Fprintf(ofile, "%v %v\n", intermediate[i].Key, output)
-            i = j
-
+        } else {
+            time.Sleep(time.Second)
         }
     }
 

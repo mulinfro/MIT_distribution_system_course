@@ -20,7 +20,7 @@ type Master struct {
 
 // Your code here -- RPC handlers for the worker to call.
 func (m *Master) GetOneJob(args *AskJobArgs, reply *AskJobReply) error {
-    reply.filename = nil
+    // reply.filenames = nil
     for job := range m.jobs {
         if ! job.hasDone {
             job.hasDone = true
